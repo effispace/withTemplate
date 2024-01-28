@@ -6,6 +6,9 @@ import os
 from moviepy.editor import *
 from pptx_to_pdf import convert_pptx_to_pdf
 import re
+# from TTS.api import TTS
+from gtts import gTTS
+
 
 #importing API key etc...
 import openai
@@ -31,6 +34,9 @@ transition_duration = 0.5  # Duration of the transition between images in second
 template_file = 'template.pptx'#load the powerpoint template
 prs = Presentation(template_file)
 
+# text to speeech model - using Coqui TTS
+# tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+
 #generate chatgpt slides content LLM content generation (prompt argument is the topic of the presentation)
 def create_content(prompt):
     print("Converting to educational content....")
@@ -44,9 +50,20 @@ def create_content(prompt):
     # write response to the file
     nextpass = story.choices[0].message.content  
     file_name = "chatgptresponse.txt"
-    with open(file_name, 'w') as file:
+    with open(file_name, 'w', encoding="utf-8") as file:
         # Write the string to the file
         file.write(nextpass)
+
+def convert_script_to_audio(script: str, slide_number: int):
+    # Convert the script to an MP3 file and save it
+    audio_path = f"slide_audio/slide_{slide_number}.mp3"
+    tts = gTTS(script, lang='en', tld='co.uk')
+    tts.save(f"slide_audio/slide_{slide_number}.mp3")
+
+    # deprecated - using Coqui TTS which is licensed. But might be able to find non-licensed version - below:
+    # tts.tts_to_file(text=script, output_path =audio_path, language="en")
+
+
 def add_title(titleName):
     slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(slide_layout)
@@ -81,8 +98,11 @@ def create_presentation_from_text(file_path):
     with open(file_path, 'r') as file:
         content = file.read()
     slides = re.split(r'Title:', content)[1:]
+    convert_script_to_audio("Thanks for listening <3", len(slides) + 2)
 
-    for slide in slides:
+    for (slide_number, slide) in enumerate(slides):
+        convert_script_to_audio(slide, slide_number + 1 + 1) # + 1 for 1 indexing, +1 for title
+
         title_match = re.match(r'(.+)', slide)
         bullet_points_match = re.findall(r'- (.+)', slide)
         if title_match:
@@ -139,20 +159,31 @@ def create_slideshow(images_folder, output_video_path, frame_rate, duration_per_
 
     final_clip = []
 
-    for i in range(0, len(image_clips)):
-        clip = image_clips[i]
+    for (i, clip) in enumerate(image_clips):
+        # add audio to clip
+        audioclip = AudioFileClip(f"slide_audio/slide_{i + 1}.mp3")
+
+        # add transition to clip
         fadein_clip = fadein(clip, transition_duration)
         fadeout_clip = fadeout(clip, transition_duration)
         final_clip.append(fadein_clip)
-        final_clip.append(clip.set_duration(clip.duration - transition_duration*2))
+        clip = clip.set_audio(audioclip)
+        final_clip.append(clip.set_duration(audioclip.duration))
         final_clip.append(fadeout_clip)
 
-    concatenate_videoclips(final_clip).write_videofile(output_video_path, codec='libx264', fps=frame_rate)
+    concatenated_clip = concatenate_videoclips(final_clip)
+    bgm = AudioFileClip("bgm/John_Bartmann_-_01_-_Mad_Hatter_Tea_Party(chosic.com).mp3").volumex(0.5).audio_loop(duration = concatenated_clip.duration)
+    concatenated_clip.audio = CompositeAudioClip([concatenated_clip.audio, bgm])
+
+    concatenated_clip.write_videofile(output_video_path, codec='libx264', fps=frame_rate)
 
 if __name__ == "__main__":
-    topic = "galaxies"
-    create_content(topic) #generate chatgpt script for presentation - parameter is topic
+    topic = "cheese"
+    # create_content(topic) #generate chatgpt script for presentation - parameter is topic
     #change prompt as you feel is right in order to get a script that will flow well 
+
+    # create title audio clip
+    convert_script_to_audio(topic, 1)
    
     file_path = "chatgptresponse.txt"
     add_title(topic)
